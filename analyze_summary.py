@@ -2,19 +2,19 @@
 Erzeugt eine hausverwaltungs-taugliche HTML-Zusammenfassung der Wasserzähler-Daten.
 Liest dieselben Eingabedateien wie analyze.py (zaehlerstaende.csv, wetter.csv).
 Ausgabe: output/zusammenfassung.html
- 
+
 Aufruf: python analyze_summary.py
 """
- 
+
 import os
 import datetime
 import math
 import pandas as pd
- 
+
 import config
- 
+
 # --- Daten laden ---------------------------------------------------------
- 
+
 def load_data() -> pd.DataFrame:
     df = pd.read_csv(config.OUTPUT_CSV)
     df = df[(df["lesbarkeit"] != "FEHLER") & (df["plausibel"] == "ja")].copy()
@@ -23,15 +23,15 @@ def load_data() -> pd.DataFrame:
     df = df.dropna(subset=["gesamtwert_m3"])
     df = df.sort_values("zeitstempel").reset_index(drop=True)
     return df
- 
- 
+
+
 def load_weather_cache() -> dict:
     if not os.path.exists(config.WETTER_CSV):
         return {}
     wdf = pd.read_csv(config.WETTER_CSV)
     return {row["datum"]: row for _, row in wdf.iterrows()}
- 
- 
+
+
 def compute_consumption(df: pd.DataFrame) -> pd.DataFrame:
     df["delta_m3"] = df["gesamtwert_m3"].diff()
     df["delta_minuten"] = df["zeitstempel"].diff().dt.total_seconds() / 60
@@ -44,8 +44,8 @@ def compute_consumption(df: pd.DataFrame) -> pd.DataFrame:
         & ~df["ist_datenluecke"]
     )
     return df
- 
- 
+
+
 def _verteile_intervall_auf_stunden(start, ende, delta_m3: float) -> dict:
     gesamt_minuten = (ende - start).total_seconds() / 60
     if gesamt_minuten <= 0:
@@ -61,8 +61,8 @@ def _verteile_intervall_auf_stunden(start, ende, delta_m3: float) -> dict:
         anteile[key] = anteile.get(key, 0) + anteil
         aktuell = segment_ende
     return anteile
- 
- 
+
+
 def compute_daily_consumption(df: pd.DataFrame) -> dict:
     df = df.dropna(subset=["delta_m3"]).copy()
     df["start_zeit"] = df["zeitstempel"].shift(1)
@@ -74,23 +74,23 @@ def compute_daily_consumption(df: pd.DataFrame) -> dict:
                 row["start_zeit"], row["zeitstempel"], row["delta_m3"]).items():
             pro_tag[datum] = pro_tag.get(datum, 0) + wert
     return pro_tag
- 
- 
+
+
 def compute_zero_minutes(df: pd.DataFrame) -> dict:
     df = df.dropna(subset=["delta_minuten", "ist_nullverbrauch"]).copy()
     df["datum"] = df["zeitstempel"].dt.date
     return df[df["ist_nullverbrauch"]].groupby("datum")["delta_minuten"].sum().to_dict()
- 
- 
+
+
 def hat_datenluecke(df: pd.DataFrame, datum) -> bool:
     df2 = df.copy()
     df2["start_zeit"] = df2["zeitstempel"].shift(1)
     luecken = df2[df2["ist_datenluecke"] & df2["start_zeit"].notna()]
     return any(row["start_zeit"].date() == datum for _, row in luecken.iterrows())
- 
- 
+
+
 # --- Kernaussage ---------------------------------------------------------
- 
+
 def baue_kernaussage(tage_komplett, tagesverbrauch, null_minuten,
                      hochrechnung_jahr, beobachtungs_tage) -> str:
     nullverbrauch_taeglich = all(
@@ -112,10 +112,10 @@ def baue_kernaussage(tage_komplett, tagesverbrauch, null_minuten,
         f"können durch diese Messung (Basis: {beobachtungs_tage:.0f} Tage) "
         f"nicht bestätigt werden."
     )
- 
- 
+
+
 # --- Hilfsformatierung ---------------------------------------------------
- 
+
 def _fmt_wetter(wetter) -> str:
     if wetter is None:
         return "—"
@@ -127,14 +127,14 @@ def _fmt_wetter(wetter) -> str:
     except (ValueError, TypeError):
         pass
     return s
- 
- 
+
+
 def _fmt_null(minuten: float) -> str:
     h = int(minuten // 60)
     m = int(minuten % 60)
     return f"{h}h {m:02d}min"
- 
- 
+
+
 def _bar_html(wert, max_wert, farbe, hoehe_px=80) -> str:
     pct = max(4, round(wert / max_wert * 100)) if max_wert > 0 else 4
     bar_h = max(4, round(hoehe_px * pct / 100))
@@ -142,13 +142,13 @@ def _bar_html(wert, max_wert, farbe, hoehe_px=80) -> str:
         f'<div style="width:100%;height:{bar_h}px;background:{farbe};'
         f'border-radius:3px 3px 0 0;display:block"></div>'
     )
- 
- 
+
+
 # --- Tabelle: Wochenaggregat + Einzeltage --------------------------------
- 
+
 DETAIL_TAGE = 7  # letzte N vollständige Tage einzeln anzeigen
- 
- 
+
+
 def baue_tabellenzeilen(alle_tage, tage_komplett, tagesverbrauch,
                         null_minuten, wetter, df) -> str:
     """
@@ -157,38 +157,38 @@ def baue_tabellenzeilen(alle_tage, tage_komplett, tagesverbrauch,
     Rand-Tage (erster/letzter): immer Einzelzeile, ohne Hochrechnung.
     """
     rand_tage = {alle_tage[0], alle_tage[-1]} if len(alle_tage) >= 2 else set(alle_tage)
- 
+
     # Vollständige Tage aufteilen
     detail_tage = set(tage_komplett[-DETAIL_TAGE:])
     aeltere_tage = [t for t in tage_komplett if t not in detail_tage]
- 
+
     zeilen = ""
- 
+
     # --- Erster Rand-Tag -------------------------------------------------
     if alle_tage:
         zeilen += _einzelzeile(alle_tage[0], tagesverbrauch, null_minuten,
                                wetter, df, ist_rand=True)
- 
+
     # --- Ältere Tage als Wochenblöcke ------------------------------------
     if aeltere_tage:
         # In 7-Tage-Blöcke aufteilen
         bloecke = [aeltere_tage[i:i+7] for i in range(0, len(aeltere_tage), 7)]
         for block in bloecke:
             zeilen += _wochenzeile(block, tagesverbrauch, null_minuten)
- 
+
     # --- Einzelzeilen letzte DETAIL_TAGE ---------------------------------
     for tag in tage_komplett[-DETAIL_TAGE:]:
         zeilen += _einzelzeile(tag, tagesverbrauch, null_minuten,
                                wetter, df, ist_rand=False)
- 
+
     # --- Letzter Rand-Tag ------------------------------------------------
     if len(alle_tage) >= 2:
         zeilen += _einzelzeile(alle_tage[-1], tagesverbrauch, null_minuten,
                                wetter, df, ist_rand=True)
- 
+
     return zeilen
- 
- 
+
+
 def _einzelzeile(tag, tagesverbrauch, null_minuten, wetter, df,
                  ist_rand: bool) -> str:
     luecke = hat_datenluecke(df, tag)
@@ -198,13 +198,13 @@ def _einzelzeile(tag, tagesverbrauch, null_minuten, wetter, df,
     hochr = v_m3 * 365 if not ist_rand else None
     w = wetter.get(tag.isoformat())
     datum_str = tag.strftime("%d.%m.")
- 
+
     anmerkung = ""
     if ist_rand:
         anmerkung = " ¹"
     if luecke:
         anmerkung += " ²"
- 
+
     hochr_td = (
         f'<td style="text-align:right">{hochr:.0f} m³</td>'
         if hochr is not None else
@@ -215,7 +215,7 @@ def _einzelzeile(tag, tagesverbrauch, null_minuten, wetter, df,
         if null_m > 0 else
         '<td style="text-align:right;color:#888">0h 00min</td>'
     )
- 
+
     return f"""
     <tr>
       <td>{datum_str}{anmerkung}</td>
@@ -225,8 +225,8 @@ def _einzelzeile(tag, tagesverbrauch, null_minuten, wetter, df,
       {null_td}
       <td style="text-align:right">{_fmt_wetter(w)}</td>
     </tr>"""
- 
- 
+
+
 def _wochenzeile(tage: list, tagesverbrauch: dict, null_minuten: dict) -> str:
     """Aggregierte Zeile für einen Block älterer Tage."""
     von = tage[0].strftime("%d.%m.")
@@ -236,7 +236,7 @@ def _wochenzeile(tage: list, tagesverbrauch: dict, null_minuten: dict) -> str:
     v_avg_m3 = v_gesamt_m3 / len(tage)
     hochr = v_avg_m3 * 365
     null_avg = sum(null_minuten.get(t, 0) for t in tage) / len(tage)
- 
+
     return f"""
     <tr style="background:#f8f8f8;font-style:italic;color:#555">
       <td>{von}–{bis} <span style="font-size:11px">(∅/{len(tage)}d)</span></td>
@@ -246,20 +246,20 @@ def _wochenzeile(tage: list, tagesverbrauch: dict, null_minuten: dict) -> str:
       <td style="text-align:right">{_fmt_null(null_avg)} ∅</td>
       <td style="text-align:right">—</td>
     </tr>"""
- 
- 
+
+
 # --- HTML erzeugen -------------------------------------------------------
- 
+
 def erzeuge_html(output_path: str):
     df = load_data()
     df = compute_consumption(df)
     wetter = load_weather_cache()
     tagesverbrauch = compute_daily_consumption(df)
     null_minuten = compute_zero_minutes(df)
- 
+
     alle_tage = sorted(set(tagesverbrauch.keys()) | set(null_minuten.keys()))
     tage_komplett = alle_tage[1:-1] if len(alle_tage) >= 3 else alle_tage
- 
+
     # Gesamtkennzahlen
     beobachtungs_stunden = (
         df["zeitstempel"].iloc[-1] - df["zeitstempel"].iloc[0]
@@ -268,25 +268,25 @@ def erzeuge_html(output_path: str):
     verbrauch_gesamt = df["gesamtwert_m3"].iloc[-1] - df["gesamtwert_m3"].iloc[0]
     verbrauch_pro_tag = verbrauch_gesamt / beobachtungs_tage
     hochrechnung_jahr = verbrauch_pro_tag * 365
- 
+
     # Balkendiagramme: letzte DETAIL_TAGE vollständige Tage
     balken_tage = tage_komplett[-DETAIL_TAGE:]
     max_verbrauch_l = max((tagesverbrauch.get(t, 0) * 1000 for t in balken_tage), default=1)
     max_null = max((null_minuten.get(t, 0) for t in balken_tage), default=1)
- 
+
     kernaussage = baue_kernaussage(
         tage_komplett, tagesverbrauch, null_minuten,
         hochrechnung_jahr, beobachtungs_tage
     )
- 
+
     heute = datetime.date.today().strftime("%d.%m.%Y")
     von_str = df["zeitstempel"].iloc[0].strftime("%d.%m.%Y")
     bis_str = df["zeitstempel"].iloc[-1].strftime("%d.%m.%Y")
- 
+
     tabellenzeilen = baue_tabellenzeilen(
         alle_tage, tage_komplett, tagesverbrauch, null_minuten, wetter, df
     )
- 
+
     # --- Balkendiagramm Tagesverbrauch -----------------------------------
     balken_verbrauch = ""
     for tag in balken_tage:
@@ -300,7 +300,7 @@ def erzeuge_html(output_path: str):
           <div style="font-size:11px;color:#666;writing-mode:vertical-rl;
                transform:rotate(180deg);height:36px;line-height:1">{tag.strftime('%d.%m')}</div>
         </div>"""
- 
+
     # --- Balkendiagramm Nullverbrauch ------------------------------------
     balken_null = ""
     for tag in balken_tage:
@@ -312,7 +312,7 @@ def erzeuge_html(output_path: str):
           <div style="font-size:11px;color:#666;writing-mode:vertical-rl;
                transform:rotate(180deg);height:36px;line-height:1">{tag.strftime('%d.%m')}</div>
         </div>"""
- 
+
     html = f"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -358,12 +358,12 @@ def erzeuge_html(output_path: str):
 </head>
 <body>
 <div class="page">
- 
+
   <div>
     <h1>Wasserzähler Nr. {config.METER_SERIAL_NUMBER}</h1>
     <h2>Beobachtungszeitraum {von_str} – {bis_str} &nbsp;·&nbsp; Erstellt am {heute}</h2>
   </div>
- 
+
   <div class="kpi-row">
     <div class="kpi">
       <div class="lbl">Hochrechnung Jahresverbrauch</div>
@@ -386,7 +386,7 @@ def erzeuge_html(output_path: str):
       <div class="sub">Nächtl. Nullverbrauch täglich nachweisbar</div>
     </div>
   </div>
- 
+
   <div class="two-col">
     <div class="card">
       <h3>Tagesdetails</h3>
@@ -410,7 +410,7 @@ def erzeuge_html(output_path: str):
         ² Datenlücke – Wert durch Zeitinterpolation rekonstruiert
       </div>
     </div>
- 
+
     <div class="card">
       <h3>Tagesverbrauch (Liter, letzte {DETAIL_TAGE} Tage)</h3>
       <div class="chart-row">
@@ -419,7 +419,7 @@ def erzeuge_html(output_path: str):
       <div class="footnotes" style="margin-top:.6rem">
         Grau = Datenlücke (interpolierter Wert)
       </div>
- 
+
       <div style="margin-top:1.25rem">
         <h3>Zeit ohne Wasserverbrauch (letzte {DETAIL_TAGE} Tage)</h3>
         <div class="chart-row">
@@ -431,25 +431,30 @@ def erzeuge_html(output_path: str):
       </div>
     </div>
   </div>
- 
+
   <div class="notice">
     <strong>Kernaussage:</strong> {kernaussage}
   </div>
- 
+
 </div>
 </body>
 </html>"""
- 
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Zusammenfassung gespeichert: {output_path}")
- 
- 
+
+
 def main():
-    output_path = os.path.join(config.OUTPUT_DIR, "zusammenfassung.html")
-    erzeuge_html(output_path)
- 
- 
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    # Archiv-Version mit Timestamp (z.B. zusammenfassung_20260628_1435.html)
+    archiv_path = os.path.join(config.OUTPUT_DIR, f"zusammenfassung_{timestamp}.html")
+    erzeuge_html(archiv_path)
+    # Aktuelle Version ohne Timestamp (wird bei jedem Lauf ueberschrieben)
+    aktuell_path = os.path.join(config.OUTPUT_DIR, "zusammenfassung.html")
+    erzeuge_html(aktuell_path)
+
+
 if __name__ == "__main__":
     main()
