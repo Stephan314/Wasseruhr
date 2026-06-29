@@ -446,28 +446,36 @@ def main():
     if df.empty:
         print("Keine gültigen Daten in der CSV gefunden.")
         return
-
+ 
     df = compute_consumption(df)
     anomalies = detect_anomalies(df)
-
+ 
     print(f"\nZeitraum: {df['zeitstempel'].min()} bis {df['zeitstempel'].max()}")
     print(f"Anzahl Messpunkte: {len(df)}")
     print(f"Gesamtverbrauch im Zeitraum: {df['gesamtwert_m3'].iloc[-1] - df['gesamtwert_m3'].iloc[0]:.3f} m³\n")
-
+ 
     print("--- Anomalie-Check ---")
     for key, val in anomalies.items():
         print(f"  {key}: {val}")
-
+ 
     if anomalies.get("grundlast_verdacht"):
         print("\n  ACHTUNG: Durchgehende nächtliche Grundlast erkannt -> mögliches Leck.")
     else:
         print("\n  Keine durchgehende nächtliche Grundlast erkannt -> kein klares Leck-Signal.")
-
-    plot_consumption(df)
-
+ 
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+ 
     profil = compute_hourly_profile(df)
+ 
+    # Archiv-Versionen mit Timestamp (z.B. plot_20260628_1435.png)
+    plot_consumption(df, os.path.join(config.OUTPUT_DIR, f"plot_{timestamp}.png"))
+    plot_hourly_profile(profil, os.path.join(config.OUTPUT_DIR, f"tagesprofil_{timestamp}.png"))
+ 
+    # Aktuelle Versionen ohne Timestamp (werden bei jedem Lauf überschrieben)
+    plot_consumption(df)
     plot_hourly_profile(profil)
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
